@@ -1,0 +1,147 @@
+---
+title: "Distribution Explorer"
+format: html
+editor: visual
+execute:
+  echo: false
+  warning: false
+  message: false
+server: shiny
+---
+
+```{r setup}
+
+require(quarto)
+require(haven)
+library(shiny)
+library(tidyverse)
+library(gt)
+library(shinyWidgets)
+
+
+adlb <- read_sas("../../../Outputs/Aplastic_Anemia/COMPLETE_Sobi_IA2_SubAnalysisAnaemia_12JUN2025/Datasets/ADaM/adlb.sas7bdat")
+
+df <- adlb %>% filter(FAS6FL == 'Y' & ANL01FL == 'Y' 
+                          & AVISITN %in% c(1,2)
+                       & PARAMCD %in% c("HGB", "LDH", "ARC", "FERRITIN", "TOTBIL")) %>%  mutate(APLANEMA = as.factor(APLANEMA), AVISIT = as.factor(AVISIT), PARAMCD = as.factor(PARAMCD))
+
+# Choices for continuous and grouping variables
+numeric_vars <- names(df)[sapply(df, is.numeric)]
+grouping_vars <- names(df)[sapply(df, function(x) is.factor(x) || is.character(x))]
+
+```
+
+## 🎛️ Controls
+
+```{r}
+# Continuous variable selector
+selectInput("var", "Select Continuous Variable",
+            choices = numeric_vars,
+            selected = "mpg")
+
+# Grouping variable selector (STATIC, no renderUI)
+pickerInput(
+  inputId = "groups",
+  label = "Select Grouping Variables (up to 2)",
+  choices = grouping_vars,
+  multiple = TRUE,
+  options = list(
+    `max-options` = 2,
+    `actions-box` = TRUE
+  )
+)
+```
+
+```{r}
+# Dynamically render group input AFTER app loads (fixes the bug)
+renderUI({
+  req(df)
+  group_choices <- names(df)[sapply(df, function(x) is.factor(x) || is.character(x))]
+
+  pickerInput(
+    inputId = "groups",
+    label = "Select Grouping Variables (up to 2)",
+    choices = group_choices,
+    multiple = TRUE,
+    options = list(
+      `max-options` = 2,
+      `actions-box` = TRUE
+    )
+  )
+})
+```
+
+------------------------------------------------------------------------
+
+## 📊 Boxplot
+
+```{r}
+renderPlot({
+  req(input$groups, input$var)
+  grouping_vars <- input$groups
+  
+  p <- ggplot(df, aes_string(x = grouping_vars[1], y = input$var, fill = grouping_vars[1])) +
+    geom_boxplot() +
+    labs(title = paste("Boxplot of", input$var, "by", paste(grouping_vars, collapse = " & ")),
+         x = grouping_vars[1], y = input$var) +
+    theme_minimal()
+  
+  if (length(grouping_vars) == 2) {
+    p <- p + facet_wrap(as.formula(paste("~", grouping_vars[2])))
+  }
+  
+  p
+})
+```
+
+------------------------------------------------------------------------
+
+## Density Plot
+
+```{r}
+renderPlot({
+  req(input$groups, input$var)
+  grouping_vars <- input$groups
+  
+  p <- ggplot(df, aes_string(x = input$var, fill = grouping_vars[1])) +
+    geom_density(alpha = 0.6) +
+    labs(title = paste("Density Plot of", input$var, "by", grouping_vars[1]),
+         x = input$var, y = "Density") +
+    theme_minimal()
+  
+  p
+})
+```
+
+------------------------------------------------------------------------
+
+## 📋 Descriptive Statistics
+
+```{r table}
+render_gt({
+  req(input$groups, input$var)
+  grouping_vars <- input$groups
+  
+  df %>%
+    group_by(across(all_of(grouping_vars))) %>%
+    summarise(
+      Count = n(),
+      Mean = mean(.data[[input$var]], na.rm = TRUE),
+      SD = sd(.data[[input$var]], na.rm = TRUE),
+      Min = min(.data[[input$var]], na.rm = TRUE),
+      Max = max(.data[[input$var]], na.rm = TRUE),
+      .groups = "drop"
+    ) %>%
+    gt() %>%
+    tab_header(
+      title = "Descriptive Statistics Table"
+    ) %>%
+    fmt_number(columns = where(is.numeric), decimals = 2)
+})
+```
+
+```{r run}
+#| eval: false
+#| include: false
+quarto::quarto_preview("app1.qmd") # Or click "Run as Shiny App"
+```
